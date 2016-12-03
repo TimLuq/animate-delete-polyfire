@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width">
+  <base href="http://polygit.org/firebase-sdk+firebase+:master/polymerfire+firebase+:master/components/">
+  <link href="polymer/polymer.html" rel="import">
+  <link href="iron-icon/iron-icon.html" rel="import">
+  <link href="iron-icons/iron-icons.html" rel="import">
+  <link href="paper-input/paper-input.html" rel="import">
+  <link href="paper-icon-button/paper-icon-button.html" rel="import">
+  <link href="paper-button/paper-button.html" rel="import">
+  <link href="polymerfire/firebase-app.html" rel="import">
+  <link href="polymerfire/firebase-auth.html" rel="import">
+  <link href="polymerfire/firebase-query.html" rel="import">
+  <title>Delayed replication list</title>
+  <style>
+    html, body {background: #f7f7f7; position: fixed; left:0;right:0;top:0;bottom:0;}
+    .h {display:flex;flex: 1 0 auto;flex-direction:row;}
+    .c {align-items: center; }
+    .f {flex: 1 0 auto;}
+    .m {margin: 8px;}
+    .row {background:#fff;transition:opacity 1200ms, transform 1200ms; }
+    .rem {opacity:0;transform:translate(80%,0) scale(0.2,0.2);}
+    .content { padding: 8px;}
+    [hidden] { display: none !important; }
+    #whenNoUser {
+      display: flex; flex-direction: column;
+      align-items: center; align-content: center; justify-content: center;
+      position: absolute; left: 0; right: 0; bottom: 0; top: 0;
+    }
+    #whenNoUser > paper-button {
+      margin: 8px; background: blue; color: white;
+    }
+  </style>
+</head>
+<body>
+  <template id="poly" is="dom-bind">
+    <firebase-app
+      auth-domain="animate-delete.firebaseapp.com"
+      database-url="https://animate-delete.firebaseio.com"
+      api-key="AIzaSyBrYHTWddSMU9UqeIX0mY-OC8_h26cxoyI"
+    ></firebase-app>
+    <firebase-auth id="auth"
+      user="{{user}}" provider="google"
+    ></firebase-auth>
+    
+    <div id="whenUser" hidden$="[[!user]]">
+      <div class="h c m">
+        <paper-input id="msg" class="f"
+          label="Add message..."></paper-input>
+        <paper-icon-button on-tap="addMessage"
+          alt="Submit message"
+          icon="send"></paper-icon-button>
+      </div>
+
+      <template is="dom-repeat" items="{{replItems}}" as="item">
+        <div class="row h c m" id="message-[[index]]">
+          <div id="content-[[index]]"
+            class="content f">[[item.content]]</div>
+          <paper-icon-button id="clear-[[index]]"
+            on-tap="delMessage"
+            alt="Delete message"
+            aria-describedby$="content-[[index]]"
+            icon="clear"
+            item-payload="[[item]]"></paper-icon-button>
+        </div>
+      </template>
+    </div>
+    
+    <div id="whenNoUser" hidden$="[[_bool(user)]]">
+      <paper-button raised on-tap="signIn" id="google" autofocus>Sign in with Google</paper-button>
+      <paper-button raised on-tap="signIn" id="anon">Sign in anonomously</paper-button>
+    </div>
+  </template>
+  
+  <script>
+    (function () {
+      'use strict';
+      
+      var newAbove = true, animationTime = 1200, poly = document.getElementById('poly');
+      
+      function addMessage() {
+        var e = this.$.msg, m = e.value;
+        if (!m) return;
+        this.unshift('items', {content: m});
+        // or `firebase.database.ref.push` which will effect `items`
+        e.value = null;
+      }
+      
+      function delMessage(e) {
+        var t = e.currentTarget, i;
+        t.disabled = true;
+        i = this.items.indexOf(t.itemPayload);
+        if (i != -1) this.splice('items', i, 1);
+      }
+      
+      function _itemsChanged(splices) {
+        // this is where the black magic happens
+        if (!splices) {
+          if (this.replItems.length) {
+            this.splice('replItems', 0, this.replItems.length);
+          }
+          return;
+        }
+
+        var s = splices.indexSplices, i, j, x, rl = [], self = this;
+        for (i = 0; i < s.length; i++) {
+          // handle removed
+          for (j = 0; j < s[i].removed.length; j++) {
+            x = this.replItems.indexOf(s[i].removed[j]);
+            if (x != -1) {
+              // if inside an custom element this.$$
+              x = {elem: document.querySelector('#message-' + x),
+                   obj: s[i].removed[j]};
+              rl.push(x);
+              x.elem && x.elem.classList.add('rem');
+            }
+          }
+
+          // handle added
+          if (s[i].addedCount) {
+            x = s[i].object.slice(s[i].index, s[i].index + s[i].addedCount);
+            x.unshift('replItems', s[i].index + (newAbove ? 0 : j), 0);
+            this.splice.apply(this, x);
+          }
+        }
+
+        // queue actual removal of items
+        if (!rl.length) return;
+        setTimeout(function () {
+          var i, x, maxi = -1, mini = -1;
+          for (i = 0; i < rl.length; i++) {
+            x = self.replItems.indexOf(rl[i].obj);
+            if (x != -1) {
+              if (maxi == -1) {
+                mini = maxi = x;
+              } else if (x == maxi+1) {
+                maxi++;
+              } else if (x == mini-1) {
+                mini--;
+              } else {
+                self.splice('replItems', mini, 1 + maxi - mini);
+                mini = maxi = x;
+              }
+            }
+          }
+          if (maxi != -1) {
+            self.splice('replItems', mini, 1 + maxi - mini);
+          }
+        }, animationTime);
+      }
+      
+      function signIn(e) {
+        if (e.currentTarget.id == 'anon') {
+          this.$.auth.signInAnonymously();
+        } else {
+          this.$.auth.signInWithRedirect(e.currentTarget.id);
+        }
+      }
+      
+      poly.addEventListener('dom-change', function () {
+        this.addMessage = addMessage;
+        this.delMessage = delMessage;
+        this._itemsChanged = _itemsChanged;
+        this.signIn = signIn;
+        this.set('_bool', function (a) { return !!a; });
+        this.set('items', []);
+        this.set('replItems', []);
+        this._addComplexObserverEffect('_itemsChanged(items.splices)');
+        
+        // adding some examples
+        this.push('items',
+                  {content: 'Example 0'},
+                  {content: 'Example 1'},
+                  {content: 'Example 2'})
+      }, false);
+    }());
+  </script>
+</body>
+</html>
